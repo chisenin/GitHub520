@@ -1,0 +1,63 @@
+name: Sync from Upstream
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # 每天UTC时间3点运行
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Set upstream repo (from env or manual)
+        run: |
+          # 优先使用环境变量配置的上游仓库，否则使用手动输入
+          if [ -z "${{ env.UPSTREAM_REPO }}" ]; then
+            echo "请在环境变量中配置 UPSTREAM_REPO"
+            exit 1
+          fi
+          git remote add upstream ${{ env.UPSTREAM_REPO }} || true
+          git fetch upstream
+
+      - name: Merge upstream changes
+        run: |
+          # 默认使用 main 分支，可通过环境变量覆盖
+          git checkout ${{ env.TARGET_BRANCH || 'main' }}
+          git merge upstream/${{ env.UPSTREAM_BRANCH || 'main' }} --no-edit || echo "Merge conflict occurred"
+
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ env.TARGET_BRANCH || 'main' }}
+        if: success()
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 1,
+              body: '⚠️ 上游同步失败，请手动处理冲突'
+            })
+
+env:
+  # 配置区：仅需填写上游仓库地址，分支默认使用main
+  UPSTREAM_REPO: "https://github.com/521xueweihan/GitHub520.git"  # 例如：https://github.com/upstream-owner/upstream-repo.git
+  # 可选配置：如需自定义分支可取消注释
+  # UPSTREAM_BRANCH: "dev"
+  # TARGET_BRANCH: "dev"
